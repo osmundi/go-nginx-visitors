@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -105,32 +104,6 @@ func (all allVisitors) ShowMonthlyVisitors() {
 		}
 		months = nil
 	}
-}
-
-// util
-func stringInSlice(a string, list []string) bool {
-	for _, b := range list {
-		if b == a {
-			return true
-		}
-	}
-	return false
-}
-
-func appendUnique(uniqueStrings map[string]struct{}, value string) {
-	// Check if the value is already in the list
-	if _, exists := uniqueStrings[value]; !exists {
-		// Add the value to the list
-		uniqueStrings[value] = struct{}{}
-	}
-}
-
-func prettyPrint(data map[int]map[int]*visitors) (string, error) {
-	prettyJSON, err := json.MarshalIndent(data, "", " ")
-	if err != nil {
-		return "", err
-	}
-	return string(prettyJSON), nil
 }
 
 func isCrawler(line string, bannedIps *[]string) bool {
