@@ -22,9 +22,10 @@ func TestReadLogFile(t *testing.T) {
 	// Create allVisitors and uniqueVisitors structures
 	allVisitors := allVisitors{visitors: new(visitors), yearly: make(map[int]*yearlyVisitors)}
 	uniqueVisitors := make(map[string]struct{})
+	var current currentVisitors
 
 	// Call the function being tested
-	readLogFile(tmpfile.Name(), &allVisitors, uniqueVisitors)
+	readLogFile(tmpfile.Name(), &allVisitors, uniqueVisitors, &current)
 
 	// Perform assertions based on the expected behavior
 	expectedNew := 1
@@ -38,20 +39,20 @@ func TestReadLogFile(t *testing.T) {
 	os.Remove(tmpfile.Name())
 }
 
-func TestAllVisitors_GetNew(t *testing.T) {
+func TestAllVisitors_GetVisitorsFrom(t *testing.T) {
 	// Create an example allVisitors structure for testing
 	allVisitors := allVisitors{visitors: &visitors{new: 10, old: 5}, yearly: make(map[int]*yearlyVisitors)}
 	allVisitors.yearly[2022] = &yearlyVisitors{visitors: &visitors{new: 5, old: 2}}
 
 	// Call the function being tested
 	//err, result := allVisitors.GetNew("20/04/2022")
-	err, result := allVisitors.GetNew("2022")
+	err, result := allVisitors.GetVisitorsFrom("2022")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Perform assertions based on the expected behavior
-	expectedResult := 5
+	expectedResult := visitors{new: 5, old: 2}
 
 	if result != expectedResult {
 		t.Errorf("Expected result: %d, got result: %d", expectedResult, result)
