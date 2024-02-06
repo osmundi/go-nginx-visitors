@@ -16,6 +16,8 @@ type visitors struct {
 	old int
 }
 
+type uniqueVisitors map[string]struct{}
+
 type currentVisitors struct {
 	curDay   map[string]struct{}
 	curMonth map[string]struct{}
@@ -50,24 +52,20 @@ func (v visitors) String() string {
 
 type dailyVisitors struct {
 	visitors *visitors
-	unique   []string
 }
 
 type monthlyVisitors struct {
 	visitors *visitors
-	unique   []string
 	daily    map[int]*dailyVisitors
 }
 
 type yearlyVisitors struct {
 	visitors *visitors
-	unique   []string
 	monthly  map[int]*monthlyVisitors
 }
 
 type allVisitors struct {
 	visitors *visitors
-	unique   []string
 	yearly   map[int]*yearlyVisitors
 }
 
@@ -143,8 +141,37 @@ func (all allVisitors) ShowMonthlyVisitors() {
 	}
 }
 
-func (all allVisitors) Visualize() {
-	fmt.Printf("draw")
+func (all allVisitors) ExportMonthlyVisitors() {
+	// export data to stdout in tsv format
+	months := make([]int, 0)
+	years := make([]int, 0)
+
+	f := os.Stdout
+	writer := bufio.NewWriter(f)
+
+	for year, _ := range all.yearly {
+		years = append(years, year)
+	}
+	sort.Ints(years)
+
+	fmt.Fprintln(writer, "month new old")
+
+	for _, year := range years {
+		if year < 1970 {
+			continue
+		}
+		for month, _ := range all.yearly[year].monthly {
+			months = append(months, month)
+		}
+
+		sort.Ints(months)
+		for _, k := range months {
+			fmt.Fprintf(writer, "%d/%d %d %d\n", year, k, all.yearly[year].monthly[k].visitors.new, all.yearly[year].monthly[k].visitors.old)
+		}
+		months = nil
+	}
+
+	writer.Flush()
 }
 
 func isCrawler(line string, bannedIps *[]string) bool {
@@ -156,41 +183,6 @@ func isCrawler(line string, bannedIps *[]string) bool {
 		}
 	}
 	return false
-}
-
-type uniqueVisitors map[string]struct{}
-
-func main() {
-	// Check if there are command-line arguments
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <log.file.1> <log.file.2> <log.file.n>")
-		return
-	}
-
-	// datastructure to hold visitor data
-	allVisitors := allVisitors{visitors: new(visitors), yearly: make(map[int]*yearlyVisitors)}
-
-	// ip addresses from logs (with map its possible to distinct unique visitors)
-	uniqueVisitors := make(map[string]struct{})
-
-	current := currentVisitors{curDay: make(map[string]struct{}), curMonth: make(map[string]struct{}), curYear: make(map[string]struct{})}
-
-	fmt.Println(current)
-
-	for _, arg := range os.Args[1:] {
-		readLogFile(arg, &allVisitors, uniqueVisitors, &current)
-	}
-
-	err, v := allVisitors.GetVisitorsFrom("20/04/2022")
-	if err != nil {
-		fmt.Printf("Error parsing date: %v", err)
-	}
-	fmt.Printf("struct(new): 20/4/2022:%v\n", v.new)
-	fmt.Printf("struct(new): 20/4/2022:%v\n", v.old)
-
-	fmt.Println(len(uniqueVisitors))
-
-	allVisitors.ShowMonthlyVisitors()
 }
 
 func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, current *currentVisitors) {
@@ -229,11 +221,9 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, curren
 				strings.TrimLeft(strings.Split(line, " ")[3], "["),
 			)
 			if err != nil {
-				fmt.Println(err)
-				fmt.Printf("%v\n", splitLine)
+				//fmt.Println(err)
+				//fmt.Printf("%v\n", splitLine)
 			}
-
-			//fmt.Printf("Current:\n - year: %d\n - month: %d\n - day: %d\n", len(current.curYear), len(current.curMonth), len(current.curDay))
 
 			// add recurring users on daily/monthly/yearly basis
 			if _, exists := all.yearly[t.Year()]; !exists {
@@ -250,7 +240,7 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, curren
 			if _, exists := all.yearly[t.Year()].monthly[int(t.Month())]; !exists {
 				all.InitMonth(t)
 
-				// save unique users for current month
+				// save unique users from last month
 				if lastMonth != 0 && lastYear != 0 {
 					if _, exists := all.yearly[lastYear].monthly[lastMonth]; exists {
 						all.yearly[lastYear].monthly[lastMonth].visitors.old = len(current.curMonth)
@@ -261,7 +251,7 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, curren
 			if _, exists := all.yearly[t.Year()].monthly[int(t.Month())].daily[t.Day()]; !exists {
 				all.InitDate(t)
 
-				// save unique users for current day
+				// save unique users from last day
 				if lastMonth != 0 && lastYear != 0 && lastDay != 0 {
 					if _, exists := all.yearly[lastYear].monthly[lastMonth].daily[lastDay]; exists {
 						all.yearly[lastYear].monthly[lastMonth].daily[lastDay].visitors.old = len(current.curDay)
@@ -289,4 +279,39 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, curren
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func main() {
+	// Check if there are command-line arguments
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: go run main.go <log.file.1> <log.file.2> <log.file.n>\n\nNOTE! The program logic assumes that the log files are sorted by date in ascending order.")
+		return
+	}
+
+	// datastructure to hold visitor data
+	allVisitors := allVisitors{visitors: new(visitors), yearly: make(map[int]*yearlyVisitors)}
+
+	// unique ip addresses (with map its possible to make quick checks of existing ips)
+	uniqueVisitors := make(map[string]struct{})
+
+	// keep track of unique visitors on current date
+	var current currentVisitors
+
+	for _, arg := range os.Args[1:] {
+		readLogFile(arg, &allVisitors, uniqueVisitors, &current)
+	}
+
+	// err, v := allVisitors.GetVisitorsFrom("20/04/2022")
+	// if err != nil {
+	// 	fmt.Printf("Error parsing date: %v", err)
+	// }
+	// fmt.Printf("struct(new): 20/4/2022:%v\n", v.new)
+	// fmt.Printf("struct(new): 20/4/2022:%v\n", v.old)
+
+	//fmt.Println(len(uniqueVisitors))
+
+	//allVisitors.ShowMonthlyVisitors()
+
+	allVisitors.ExportMonthlyVisitors()
+
 }
