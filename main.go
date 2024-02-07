@@ -18,31 +18,31 @@ type visitors struct {
 
 type uniqueVisitors map[string]struct{}
 
-type currentVisitors struct {
+type recurringVisitors struct {
 	curDay   map[string]struct{}
 	curMonth map[string]struct{}
 	curYear  map[string]struct{}
 }
 
-func (cv *currentVisitors) AddVisitor(ip string) {
-	if cv.curDay == nil {
-		cv.curDay = make(map[string]struct{})
+func (v *recurringVisitors) AddVisitor(ip string) {
+	if v.curDay == nil {
+		v.curDay = make(map[string]struct{})
 	}
-	if cv.curMonth == nil {
-		cv.curMonth = make(map[string]struct{})
+	if v.curMonth == nil {
+		v.curMonth = make(map[string]struct{})
 	}
-	if cv.curYear == nil {
-		cv.curYear = make(map[string]struct{})
+	if v.curYear == nil {
+		v.curYear = make(map[string]struct{})
 	}
 
-	if _, exists := cv.curDay[ip]; !exists {
-		cv.curDay[ip] = struct{}{}
+	if _, exists := v.curDay[ip]; !exists {
+		v.curDay[ip] = struct{}{}
 	}
-	if _, exists := cv.curMonth[ip]; !exists {
-		cv.curMonth[ip] = struct{}{}
+	if _, exists := v.curMonth[ip]; !exists {
+		v.curMonth[ip] = struct{}{}
 	}
-	if _, exists := cv.curYear[ip]; !exists {
-		cv.curYear[ip] = struct{}{}
+	if _, exists := v.curYear[ip]; !exists {
+		v.curYear[ip] = struct{}{}
 	}
 }
 
@@ -86,7 +86,7 @@ func (all *allVisitors) InitYear(t time.Time) {
 	all.yearly[t.Year()].visitors = new(visitors)
 }
 
-func (all *allVisitors) AddNew(t time.Time) {
+func (all *allVisitors) AddUniqueVisitor(t time.Time) {
 	all.yearly[t.Year()].visitors.new++
 	all.yearly[t.Year()].monthly[int(t.Month())].visitors.new++
 	all.yearly[t.Year()].monthly[int(t.Month())].daily[t.Day()].visitors.new++
@@ -129,7 +129,7 @@ func (all allVisitors) ShowMonthlyVisitors() {
 		}
 		fmt.Printf("Year: %d\n", year)
 
-		for month, _ := range yearly.monthly {
+		for month := range yearly.monthly {
 			months = append(months, month)
 		}
 		sort.Ints(months)
@@ -149,7 +149,7 @@ func (all allVisitors) ExportMonthlyVisitors() {
 	f := os.Stdout
 	writer := bufio.NewWriter(f)
 
-	for year, _ := range all.yearly {
+	for year := range all.yearly {
 		years = append(years, year)
 	}
 	sort.Ints(years)
@@ -160,7 +160,7 @@ func (all allVisitors) ExportMonthlyVisitors() {
 		if year < 1970 {
 			continue
 		}
-		for month, _ := range all.yearly[year].monthly {
+		for month := range all.yearly[year].monthly {
 			months = append(months, month)
 		}
 
@@ -185,7 +185,7 @@ func isCrawler(line string, bannedIps *[]string) bool {
 	return false
 }
 
-func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, current *currentVisitors) {
+func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, recurring *recurringVisitors) {
 	file, err := os.Open(logfile)
 	if err != nil {
 		log.Fatal(err)
@@ -211,6 +211,10 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, curren
 			continue
 		}
 
+		if !strings.Contains(line, "api/search") {
+			continue
+		}
+
 		splitLine = strings.Split(line, " ")
 
 		if len(splitLine) > 2 {
@@ -229,43 +233,43 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, curren
 			if _, exists := all.yearly[t.Year()]; !exists {
 				all.InitYear(t)
 
-				// save unique users from last year
+				// save old users from last year
 				if lastYear != 0 {
 					if _, exists := all.yearly[lastYear]; exists {
-						all.yearly[lastYear].visitors.old = len(current.curYear)
+						all.yearly[lastYear].visitors.old = len(recurring.curYear)
 					}
 				}
-				current.curYear = nil
+				recurring.curYear = nil
 			}
 			if _, exists := all.yearly[t.Year()].monthly[int(t.Month())]; !exists {
 				all.InitMonth(t)
 
-				// save unique users from last month
+				// save old users from last month
 				if lastMonth != 0 && lastYear != 0 {
 					if _, exists := all.yearly[lastYear].monthly[lastMonth]; exists {
-						all.yearly[lastYear].monthly[lastMonth].visitors.old = len(current.curMonth)
+						all.yearly[lastYear].monthly[lastMonth].visitors.old = len(recurring.curMonth)
 					}
 				}
-				current.curMonth = nil
+				recurring.curMonth = nil
 			}
 			if _, exists := all.yearly[t.Year()].monthly[int(t.Month())].daily[t.Day()]; !exists {
 				all.InitDate(t)
 
-				// save unique users from last day
+				// save old users from last day
 				if lastMonth != 0 && lastYear != 0 && lastDay != 0 {
 					if _, exists := all.yearly[lastYear].monthly[lastMonth].daily[lastDay]; exists {
-						all.yearly[lastYear].monthly[lastMonth].daily[lastDay].visitors.old = len(current.curDay)
+						all.yearly[lastYear].monthly[lastMonth].daily[lastDay].visitors.old = len(recurring.curDay)
 					}
 				}
-				current.curDay = nil
+				recurring.curDay = nil
 			}
-
-			current.AddVisitor(ipAddr)
 
 			if _, exists := unique[ipAddr]; !exists {
 				// increment unique visitors
 				unique[ipAddr] = struct{}{}
-				all.AddNew(t)
+				all.AddUniqueVisitor(t)
+			} else {
+				recurring.AddVisitor(ipAddr)
 			}
 
 			lastDay = t.Day()
@@ -294,11 +298,11 @@ func main() {
 	// unique ip addresses (with map its possible to make quick checks of existing ips)
 	uniqueVisitors := make(map[string]struct{})
 
-	// keep track of unique visitors on current date
-	var current currentVisitors
+	// keep track of the old visitors on daily/monthly/yearly basis
+	var recurring recurringVisitors
 
 	for _, arg := range os.Args[1:] {
-		readLogFile(arg, &allVisitors, uniqueVisitors, &current)
+		readLogFile(arg, &allVisitors, uniqueVisitors, &recurring)
 	}
 
 	// err, v := allVisitors.GetVisitorsFrom("20/04/2022")
