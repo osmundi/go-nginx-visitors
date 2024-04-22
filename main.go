@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,17 @@ import (
 	"strings"
 	"time"
 )
+
+type arrayOfFilters []string
+
+func (i *arrayOfFilters) String() string {
+	return "my string representation"
+}
+
+func (i *arrayOfFilters) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
 
 // types
 type visitors struct {
@@ -185,7 +197,21 @@ func isCrawler(line string, bannedIps *[]string) bool {
 	return false
 }
 
-func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, recurring *recurringVisitors) {
+func filterLogRow(row string, filters arrayOfFilters) bool {
+
+	if len(filters) == 0 {
+		return true
+	}
+
+	for _, filter := range filters {
+		if strings.Contains(row, filter) {
+			return true
+		}
+	}
+	return false
+}
+
+func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, recurring *recurringVisitors, filters arrayOfFilters) {
 	file, err := os.Open(logfile)
 	if err != nil {
 		log.Fatal(err)
@@ -211,7 +237,7 @@ func readLogFile(logfile string, all *allVisitors, unique uniqueVisitors, recurr
 			continue
 		}
 
-		if !strings.Contains(line, "api/search") {
+		if !filterLogRow(line, filters) {
 			continue
 		}
 
@@ -292,6 +318,12 @@ func main() {
 		return
 	}
 
+	var filters arrayOfFilters
+
+	flag.Var(&filters, "filter", "Filter all other API requests except the one in filter flag.")
+
+	flag.Parse()
+
 	// datastructure to hold visitor data
 	allVisitors := allVisitors{visitors: new(visitors), yearly: make(map[int]*yearlyVisitors)}
 
@@ -301,20 +333,9 @@ func main() {
 	// keep track of the old visitors on daily/monthly/yearly basis
 	var recurring recurringVisitors
 
-	for _, arg := range os.Args[1:] {
-		readLogFile(arg, &allVisitors, uniqueVisitors, &recurring)
+	for _, arg := range flag.Args() {
+		readLogFile(arg, &allVisitors, uniqueVisitors, &recurring, filters)
 	}
-
-	// err, v := allVisitors.GetVisitorsFrom("20/04/2022")
-	// if err != nil {
-	// 	fmt.Printf("Error parsing date: %v", err)
-	// }
-	// fmt.Printf("struct(new): 20/4/2022:%v\n", v.new)
-	// fmt.Printf("struct(new): 20/4/2022:%v\n", v.old)
-
-	//fmt.Println(len(uniqueVisitors))
-
-	//allVisitors.ShowMonthlyVisitors()
 
 	allVisitors.ExportMonthlyVisitors()
 
